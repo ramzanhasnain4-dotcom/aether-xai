@@ -22,3 +22,10 @@ CREATE TABLE IF NOT EXISTS ml_inference_audits (
     explanation_json JSONB NOT NULL,
     executed_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+-- Enable Row-Level Security (RLS) on audit records
+ALTER TABLE ml_inference_audits ENABLE ROW LEVEL SECURITY;
+
+-- Tenant Isolation Policy
+CREATE POLICY tenant_isolation_policy ON ml_inference_audits
+    FOR ALL
+    USING (tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid);
