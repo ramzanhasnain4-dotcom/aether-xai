@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  # Multi-Tenant PostgreSQL Database
+  db:
+    image: postgres:16-alpine
+    container_name: aether_db
+    environment:
+      POSTGRES_USER: aether_user
+      POSTGRES_PASSWORD: aether_password
+      POSTGRES_DB: aether_xai
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./schema:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aether_user -d aether_xai"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Aether-XAI Microservice
+  app:
+    build: .
+    container_name: aether_api
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://aether_user:aether_password@db:5432/aether_xai
+    depends_on:
+      db:
+        condition: service_healthy
+
+networks:
+  default:
+    name: aether_network
