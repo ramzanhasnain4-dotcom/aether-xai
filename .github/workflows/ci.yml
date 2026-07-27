@@ -20,6 +20,10 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
     - name: Run Unit Tests
+      env:
+        PYTHONPATH: .
       run: pytest tests/
     - name: Run Latency Benchmark
+      env:
+        PYTHONPATH: .
       run: python benchmarks/latency_test.py
