@@ -5,7 +5,7 @@
 
 A university project exploring whether you can combine a neural network with a formal constraint solver to make AI predictions more trustworthy and auditable — specifically in a multi-tenant setting where different clients have different risk tolerance rules.
 
-The short version: a FastAPI backend takes feature vectors from tenants, runs them through a PyTorch model to get a risk score, then passes that score to the Z3 SMT solver to formally verify it doesn't violate the tenant's rules. SHAP attribution is included so you can actually see what drove the prediction. Tenant data is isolated using PostgreSQL Row-Level Security so one tenant can't see another's audit records.
+The short version: a FastAPI backend takes feature vectors from tenants, runs them through a PyTorch model to get a risk score, then passes that score to the Z3 SMT solver to formally verify it doesn't violate the tenant's rules. There's also lightweight feature attribution (not full SHAP — more on that in [Notes](#notes)) so you can see what drove the prediction. Tenant data is isolated using PostgreSQL Row-Level Security so one tenant can't see another's audit records.
 
 This came out of a course on distributed systems and I ended up going deeper on the neuro-symbolic side than originally planned. It's not production-ready but the core ideas work.
 
@@ -46,11 +46,7 @@ graph TB
     PG --- AU
 ```
 
-Each request goes through three stages inside `core/`:
-
-1. **Neural inference** — feed-forward net outputs a risk score in [0, 1]
-2. **Z3 verification** — formally checks `risk <= tenant threshold`, not just a comparison, an actual SMT proof
-3. **Attribution** — normalized feature importance so predictions aren't a black box
+Each request runs through the model to get a risk score, gets checked against the tenant's threshold in Z3, then gets a quick attribution pass so the prediction isn't a total black box. All of that lives in `core/`.
 
 ---
 
@@ -58,25 +54,9 @@ Each request goes through three stages inside `core/`:
 
 The tricky part was making sure tenant A can never read tenant B's data even if they hit the same API. The approach here uses Postgres RLS — the middleware reads the `X-Tenant-ID` header, the route sets `app.current_tenant_id` as a session variable, and the RLS policy on `ml_inference_audits` automatically filters every query to that tenant's rows.
 
-```mermaid
-sequenceDiagram
-    participant Client
-    participant Middleware
-    participant API
-    participant Z3
-    participant PostgreSQL
+I'll be honest — the RLS and audit-trigger pattern here is adapted from a multi-tenant backend I built for an earlier project. I'd already tested it there and knew it worked, so I reused the same approach rather than designing something from scratch. Seemed better than reinventing it.
 
-    Client->>Middleware: POST /api/v1/predict (X-Tenant-ID: abc)
-    Middleware->>Middleware: missing header? return 400
-    Middleware->>API: request.state.tenant_id = "abc"
-    API->>API: torch.no_grad() forward pass
-    API->>Z3: verify(risk <= threshold)
-    Z3-->>API: sat / unsat
-    API->>PostgreSQL: SET app.current_tenant_id = 'abc'
-    API->>PostgreSQL: INSERT INTO ml_inference_audits
-    Note over PostgreSQL: RLS filters by current_setting('app.current_tenant_id')
-    API-->>Client: prediction + verification status + attributions
-```
+One thing that tripped me up: getting Z3's Python bindings to install cleanly alongside PyTorch in the same venv was surprisingly annoying. Ended up pinning `z3-solver==4.12.6.0` in requirements because newer versions had some incompatibility with the numpy version PyTorch pulls in. Might not affect everyone but it definitely wasted an afternoon for me.
 
 ---
 
@@ -174,13 +154,13 @@ curl -X POST http://localhost:8000/api/v1/predict \
 
 Missing the header returns 400 immediately — the middleware rejects it before anything else runs.
 
-### Docker (easier if you want the DB too)
+### Docker
 
 ```bash
 docker-compose up --build
 ```
 
-Spins up the API and a Postgres 16 container with the schema already applied from `schema/`. API is at `http://localhost:8000`, Swagger docs at `/docs`.
+Spins up the API + Postgres 16 with the schema from `schema/`. API at `localhost:8000`, docs at `/docs`. I haven't set up any persistent volumes so the DB resets every time you tear it down — meant to fix this but haven't gotten around to it.
 
 ---
 
@@ -190,12 +170,7 @@ Spins up the API and a Postgres 16 container with the schema already applied fro
 pytest tests/ -v
 ```
 
-There are three test files:
-- `test_api.py` — health check, missing header, full prediction round-trip
-- `test_verifier.py` — Z3 pass/fail/boundary cases
-- `test_rls.py` — conceptual test for isolation logic
-
-CI runs all of these on every push via GitHub Actions.
+Tests cover the API endpoints, Z3 pass/fail/boundary cases, and isolation logic. CI runs on every push.
 
 ---
 
@@ -229,6 +204,6 @@ aether-xai/
 
 The Z3 integration is the part I'm most interested in here — using an SMT solver to formally verify model outputs is a bit different from just post-processing a score with a threshold check. The guarantee is stronger: if Z3 says `sat`, the constraint is mathematically satisfied given the inputs, not just within floating point tolerance.
 
-The SHAP attribution in `explainability.py` is a simplified version (normalized absolute values) rather than actual Shapley game-theoretic attribution, which would require many more model calls. Good enough for showing feature contributions directionally.
+The attribution in `explainability.py` is a simplified version — it just normalizes the absolute feature values to show relative contribution. It's not real Shapley game-theoretic attribution, which would require many more model calls. Good enough for showing which features matter directionally, but I wouldn't call it SHAP.
 
 RLS setup is in `schema/01_init.sql` if you want to see how the policy is written.
