@@ -3,7 +3,7 @@
 ![CI](https://github.com/ramzanhasnain4-dotcom/aether-xai/actions/workflows/ci.yml/badge.svg)
 ![Python](https://img.shields.io/badge/Python-3.11-blue)
 
-A university project exploring whether you can combine a neural network with a formal constraint solver to make AI predictions more trustworthy and auditable — specifically in a multi-tenant setting where different clients have different risk tolerance rules.
+A personal project exploring whether you can combine a neural network with a formal constraint solver to make AI predictions more trustworthy and auditable — specifically in a multi-tenant setting where different clients have different risk tolerance rules.
 
 The short version: a FastAPI backend takes feature vectors from tenants, runs them through a PyTorch model to get a risk score, then passes that score to the Z3 SMT solver to formally verify it doesn't violate the tenant's rules. There's also lightweight feature attribution (not full SHAP — more on that in [Notes](#notes)) so you can see what drove the prediction. Tenant data is isolated using PostgreSQL Row-Level Security so one tenant can't see another's audit records.
 
